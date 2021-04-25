@@ -1,0 +1,134 @@
+CURPATH		= $(shell pwd)
+TARGET	    = $(shell basename $(CURPATH))
+
+TOP_DIR := $(shell git rev-parse --show-toplevel)
+include $(TOP_DIR)/depend.mk
+include $(TOP_DIR)/Services/AppFrame/AppFrame.mk
+CC=$(CXX)
+ECHO =/bin/echo
+BINDIR      = ${ROOTFS_DIR}/usr/bin
+TMPDIR      = $(TEMP_DIR)/$(TARGET)
+OUTPUT_PATH	= $(TMPDIR)
+LIBDIR      = ${ROOTFS_DIR}/usr/lib
+ETCDIR	    = ${ROOTFS_DIR}/etc
+
+#---------------------------------------------------------
+#        Specific definitions
+#---------------------------------------------------------
+
+SRC_DIR            = $(shell pwd)
+OBJ_DIR            = $(TMPDIR)
+ 
+INC_DIR		= $(SRC_DIR) $(SRC_DIR)/.. $(SRC_DIR)/../App $(SRC_DIR)/../Configurator \
+		$(SRC_DIR)/../EventHandler $(SRC_DIR)/../Exception $(SRC_DIR)/../MsgEngine \
+		$(SRC_DIR)/include \
+		$(SDKTARGETSYSROOT)/usr/include \
+		$(SDKTARGETSYSROOT)/usr/include/libxml2 \
+		$(SDKTARGETSYSROOT)/usr/include/dbus-1.0 \
+		$(SDKTARGETSYSROOT)/usr/include/json-c\
+		$(SDKTARGETSYSROOT)/usr/lib/dbus-1.0/include \
+		$(SDKTARGETSYSROOT)/usr/include/upnp \
+        	$(TOP_DIR)/MW/CSL/libtimer \
+        	$(TOP_DIR)/MW/CSL/common \
+        	$(TOP_DIR)/MW/HAL/HAL_HwInfo \
+		$(TOP_DIR)/Mgnt/OAMCore/inc \
+		$(TOP_DIR)/MW/CSL/logger/include \
+		$(TOP_DIR)/Mgnt/OAMCore/cfgmgr_ms/inc \
+		$(TOP_DIR)/Mgnt/OAMCore/mapper \
+		$(TOP_DIR)/Mgnt/OAMCore/cfgmgr_mqtt/include \
+		$(TOP_DIR)/Mgnt/OAMCore/SMI/include \
+		$(TOP_DIR)/Services/ContainerMgr/export \
+		$(TOP_DIR)/Mgnt/OAMCore/libs/libnal/export \
+		$(TOP_DIR)/MW/CSL/dbuswrapper/include \
+		$(TOP_DIR)/MW/CSL/syscfg/source/include \
+		$(TOP_DIR)/MW/SAL/SAL_PortConfig \
+		$(TOP_DIR)/Services/EasyMesh/export 
+		
+ 
+EXE_NAME       = $(OUTPUT_PATH)/${TARGET}
+
+I_OPTIONS      = ${addprefix -I,$(INC_DIR)}
+
+CFLAGS	+= -std=c++11 -fpic
+LDFLAGS := $(patsubst %--as-needed, ,$(LDFLAGS))
+LDFLAGS	+= -L $(OUTPUT_PATH) -L $(LIBDIR) -lpthread -lsmi_tr069 -lcurl -lssl -lcrypto \
+				-lmosquitto -ljson-c  -lctimer -lcs_util -lxml2 -lcommon \
+				-lcfgbase -lcfg -lsmi_tr069 -lstdc++ -lrdkloggers \
+				-ldbuswrapper -ldbus-1 -luci -lhwinfo -lfdb -lcs_crypto -lsimplelib -lpcd -lipc \
+				-lsyscfg -lubus -lubox  -lz -lcfgmgr_mqtt -lPortConfigLib
+
+ifneq (, $(filter $(ARCH), x86-64 x86-32))
+ifeq ($(ARCH), x86-64)
+LDFLAGS += -lunwind
+endif
+else
+LDFLAGS += -lunwind-arm
+endif
+SOFLAGS		= -shared -L $(OUTPUT_PATH) -L $(LIBDIR) -lcrypto 
+#----------------------------------------------------------
+#        Objects list
+#----------------------------------------------------------
+## get all source files
+
+SRCS	 += $(wildcard ../App/*.cpp) \
+			$(wildcard  ../Configurator/*.cpp) \
+	    	$(wildcard  ../EventHandler/*.cpp) \
+	    	$(wildcard  ../MsgEngine/*.cpp) \
+	    	$(wildcard  ../Exception/*.cpp) \
+	    	$(wildcard  ../*.cpp) \
+	    	$(wildcard  dbus/*.cpp) \
+	    	$(wildcard  mqtt/*.cpp) \
+	    	$(wildcard  smi/*.cpp) \
+	    	$(wildcard  smiext/*.cpp) \
+	    	$(wildcard  ubus/*.cpp) \
+		$(wildcard  src/*.cpp) \
+	    	$(wildcard  *.cpp)
+
+
+#C_OBJS    =  $(OBJ_DIR)/l2Fwd.o $(OBJ_DIR)/confd.o $(OBJ_DIR)/forwarder.o 
+TMP_SRCS  += $(foreach src, $(SRCS), $(OBJ_DIR)/$(src))
+C_OBJS     := $(TMP_SRCS:.cpp=.o)
+
+BUILD_LIST = $(TMPDIR) $(ROOTFS_DIR) $(BINDIR)
+.PHONY: all clean $(LIB_NAME)
+
+#all: MKDIR $(LIB_NAME) install
+all:	MKDIR $(EXE_NAME) $(SIGN_TOOL) install
+MKDIR:
+	@for subdir in $(BUILD_LIST);\
+    do\
+        mkdir -p $$subdir;\
+    done
+
+
+$(EXE_NAME): $(C_OBJS)
+	@$(ECHO) -e "\033[40m\033[1;37m ==> Producing exe: $@\033[0m"
+	$(CC) $(CFLAGS) $(I_OPTIONS) -o $@ $^ $(LDFLAGS) $(BIN_LDFLAGS)
+	@$(ECHO) -e "\033[40m\033[1;32m ==> $@ built \033[0m"
+
+$(OBJ_DIR)/%.o: %.cpp
+	@$(ECHO) -e "\033[40m\033[1;37m ==> Compiling module: $@\033[0m"
+	if [ ! -d $(OBJ_DIR)/../App ]; then  mkdir -p $(OBJ_DIR)/../App; fi
+	if [ ! -d $(OBJ_DIR)/../Configurator ]; then  mkdir -p $(OBJ_DIR)/../Configurator; fi
+	if [ ! -d $(OBJ_DIR)/../EventHandler ]; then  mkdir -p $(OBJ_DIR)/../EventHandler; fi
+	if [ ! -d $(OBJ_DIR)/../Exception ]; then  mkdir -p $(OBJ_DIR)/../Exception; fi
+	if [ ! -d $(OBJ_DIR)/../${TARGET} ]; then  mkdir -p $(OBJ_DIR)/../${TARGET}; fi
+	if [ ! -d $(OBJ_DIR)/../MsgEngine ]; then  mkdir -p $(OBJ_DIR)/../MsgEngine; fi
+	if [ ! -d $(OBJ_DIR)/dbus ]; then  mkdir -p $(OBJ_DIR)/dbus; fi
+	if [ ! -d $(OBJ_DIR)/mqtt ]; then  mkdir -p $(OBJ_DIR)/mqtt; fi
+	if [ ! -d $(OBJ_DIR)/smi ]; then  mkdir -p $(OBJ_DIR)/smi; fi
+	if [ ! -d $(OBJ_DIR)/smiext ]; then  mkdir -p $(OBJ_DIR)/smiext; fi
+	if [ ! -d $(OBJ_DIR)/ubus ]; then  mkdir -p $(OBJ_DIR)/ubus; fi
+	if [ ! -d $(OBJ_DIR)/src ]; then  mkdir -p $(OBJ_DIR)/src; fi
+	$(CC) $(CFLAGS) $(I_OPTIONS) -o $@ -c $<
+	@$(ECHO) -e "\033[40m\033[1;32m ==> $@ built \033[0m"
+
+install:$(EXE_NAME) 
+	@cp -p $(TMPDIR)/$(TARGET) ${BINDIR}/
+
+
+
+clean:
+	rm -rf $(OBJ_DIR)
+	rm -rf $(EXE_NAME)
+

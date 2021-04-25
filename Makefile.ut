@@ -1,0 +1,266 @@
+TOP_DIR ?= $(shell hg root)
+ifeq ($(TOP_DIR),)
+TOP_DIR := $(realpath ../../../../..)
+endif
+
+APPS_DIR := $(TOP_DIR)/apps
+GCOVR := $(TOP_DIR)/build/unittest/scripts/gcovr
+
+UT_ENVIRONMENT ?= /opt/tools/ut_environment
+OPMOCK_DIR := $(UT_ENVIRONMENT)/opmock2/support
+
+HOST_TOOLS ?= /repo/host-tools/gcc-5.3
+
+CC   := $(HOST_TOOLS)/bin/gcc
+CXX  := $(HOST_TOOLS)/bin/g++
+LDFLAGS := -Wl,-rpath,$(HOST_TOOLS)/lib
+AR   := $(HOST_TOOLS)/bin/ar
+GCOV := $(HOST_TOOLS)/bin/gcov
+
+CPPFLAGS := -I$(UT_ENVIRONMENT)/include -I$(OPMOCK_DIR)
+LDFLAGS  += -L$(UT_ENVIRONMENT)/lib
+LDFLAGS  += -lgtest -lgtest_main -lpthread -rdynamic -ldl
+CFLAGS   := -m32 -g -O0 -Wall -std=gnu89 -fprofile-arcs -ftest-coverage
+CXXFLAGS := -m32 -g -O0 -Wall -std=c++11 -fprofile-arcs -ftest-coverage
+
+
+CPPFLAGS += -DHOST
+
+# The googletest in /opt was compiled using old C++ ABI
+# Since recompiling it would break older UT of other modules,
+# we will use older ABI here instead
+CPPFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
+
+
+SRCDIR   := ../src
+EXEDIR   := bin
+UTSRCDIR := src
+MOCKDIR  := mock
+OBJDIR   := obj
+3PTYDIR  := 3pty
+
+
+UT_BINARY := $(EXEDIR)/antennaMgr_ut
+
+MAIN_SRC  := $(SRCDIR)/antennaMgr_main.cc
+
+CC_SRCS   := $(filter-out $(MAIN_SRC),$(wildcard $(SRCDIR)/*.cc))
+C_SRCS    := $(wildcard $(SRCDIR)/*.c)
+
+CC_OBJS   := $(addprefix $(OBJDIR)/,$(notdir $(CC_SRCS:.cc=.o)))
+C_OBJS    := $(addprefix $(OBJDIR)/,$(notdir $(C_SRCS:.c=.o)))
+TEST_OBJS := $(CC_OBJS) $(C_OBJS)
+
+EXTRA_CFLAGS += \
+        -Wextra \
+        -Wwrite-strings -Wmissing-declarations -Wmissing-prototypes \
+        -Wdeclaration-after-statement -Wstrict-prototypes \
+        -fno-strict-aliasing -Wno-deprecated-declarations \
+        -Wint-to-pointer-cast -Wfloat-equal -Wno-unused-parameter \
+        -Wno-sign-compare -Wunused-but-set-variable -Wundef \
+        -Wimplicit-function-declaration -Wpointer-arith -Winit-self \
+        -Wshadow -Wmissing-include-dirs -Waggregate-return -Wformat-security \
+        -Wtype-limits \
+        -Werror
+
+EXTRA_CXXFLAGS += -pedantic -Wextra -Werror -Wno-variadic-macros
+
+GLIB_DIR := $(APPS_DIR)/public/libs/glib-2.41.1
+
+CPPFLAGS += -I. \
+            -I.. \
+            -I../include \
+            -I./include \
+            -I./$(MOCKDIR)/gen \
+            -I./$(MOCKDIR)/include \
+            -I$(APPS_DIR)/public/include \
+            -I$(APPS_DIR)/public/include/linux \
+            -I$(APPS_DIR)/private/libs/timer \
+            -I$(TOP_DIR)/include \
+            -I$(TOP_DIR)/sysdrivers/gpio_mgr \
+            -I$(GLIB_DIR) \
+            -I$(GLIB_DIR)/gmodule \
+            -I$(GLIB_DIR)/glib \
+            -I$(APPS_DIR)/public/include/libqmi-glib \
+            -I$(APPS_DIR)/private/appkgs/usbbridge/include \
+            -I$(APPS_DIR)/private/appkgs/cfgmgr_ms/inc
+
+LDFLAGS +=  -L$(3PTYDIR)/lib \
+            -Wl,-rpath,$(3PTYDIR)/lib \
+            -lgio-2.0 \
+            -lgobject-2.0 \
+            -lglib-2.0
+
+UT_GEN_STUBS := $(MOCKDIR)/lib/libgenstubs.a
+
+UT_CC_SRCS := $(wildcard $(UTSRCDIR)/*.cc)
+UT_C_SRCS  := $(wildcard $(UTSRCDIR)/*.c)
+UT_CC_OBJS := $(addprefix $(OBJDIR)/,$(notdir $(UT_CC_SRCS:.cc=.o)))
+UT_C_OBJS  := $(addprefix $(OBJDIR)/,$(notdir $(UT_C_SRCS:.c=.o)))
+UT_OBJS    := $(UT_CC_OBJS) $(UT_C_OBJS)
+
+OBJS = $(UT_OBJS) $(TEST_OBJS)
+
+MODULE_LIB_FFI      := $(3PTYDIR)/lib/libffi-3.2.1/include/ffi.h
+MODULE_LIB_GLIB     := $(3PTYDIR)/lib/libglib-2.0.so.0
+
+3PTYLIBS := $(MODULE_LIB_GLIB) \
+            $(MODULE_LIB_FFI)
+
+ifdef XML
+COVXML := covxml
+endif
+
+GTEST_PARAMS ?= --gtest_death_test_style=threadsafe --gtest_repeat=3
+
+
+CPPFLAGS += -MMD
+
+##########################################################################
+.NOTPARALLEL :
+
+all : 3ptylibs genstubs $(UT_BINARY) ut_run ggcov $(COVXML)
+
+##########################################################################
+.PHONY: info
+info:
+	@echo "CC    = $(CC)"
+	@echo "CXX   = $(CXX)"
+	@echo "AR    = $(AR)"
+	@echo "RM    = $(RM)"
+	@echo "CFLAGS   = $(CFLAGS)"
+	@echo "CXXFLAGS = $(CXXFLAGS)"
+	@echo "CPPFLAGS = $(CPPFLAGS)"
+	@echo "CURDIR   = $(CURDIR)"
+	@echo "MOCKDIR  = $(MOCKDIR)"
+	@echo "OBJDIR   = $(OBJDIR)"
+	@echo "3PTYDIR  = $(3PTYDIR)"
+	@echo "UT_OBJS   = $(UT_OBJS)"
+	@echo "TEST_OBJS = $(TEST_OBJS)"
+	@echo "UT_GEN_STUBS = $(UT_GEN_STUBS)"
+
+##########################################################################
+clean: ownclean genstubs-clean 3ptylibs-clean
+
+mostlyclean: ownclean genstubs-clean
+
+ownclean : ut_run-clean
+	$(RM) -r $(EXEDIR) $(OBJDIR)
+	$(RM) -r result
+
+##########################################################################
+$(UT_BINARY) : $(OBJS) $(UT_GEN_STUBS) | $(EXEDIR)
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) $(OPMOCK_DIR)/opmock.o -o $@
+
+ut_run: $(UT_BINARY) ut_run-clean
+	@echo "======================================================"
+	@echo " Running the UT now"
+	@echo "======================================================"
+	$(UT_BINARY) $(GTEST_PARAMS)
+	@echo "======================================================"
+	@echo " UT run finished"
+	@echo "======================================================"
+	@echo
+
+ut_run-clean: ggcov-clean
+	$(RM) test.log
+
+##########################################################################
+#$(UTGENDIR):
+#	mkdir $(UTGENDIR)
+#	./generate.sh $(UTGENDIR)
+
+$(OBJS): | $(OBJDIR)
+
+$(OBJDIR):
+	mkdir $(OBJDIR)
+
+$(EXEDIR):
+	mkdir $(EXEDIR)
+
+$(C_OBJS): $(OBJDIR)/%.o: $(SRCDIR)/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
+
+$(CC_OBJS): $(OBJDIR)/%.o: $(SRCDIR)/%.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(EXTRA_CXXFLAGS) -c $< -o $@
+
+$(UT_C_OBJS): $(OBJDIR)/%.o: $(UTSRCDIR)/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(UT_CC_OBJS): $(OBJDIR)/%.o: $(UTSRCDIR)/%.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+#$(UT_STUB_OBJS): $(OBJDIR)/%.o: $(UTGENDIR)/%.c
+#	$(CC) $(CFLAGS) $(CPPFLAGS) $(UT_STUB_CPPFLAGS) -c $< -o $@
+
+genstubs: $(UT_GEN_STUBS)
+
+genstubs-clean:
+	$(MAKE) -C $(MOCKDIR) clean
+
+$(UT_GEN_STUBS):
+	$(MAKE) -C $(MOCKDIR)
+
+$(UT_GEN_STUBS)-clean:
+	$(MAKE) -C $(MOCKDIR) clean
+
+##########################################################################
+##### 3rd party libraries (not subject of UT)
+3ptylibs: $(3PTYLIBS) | $(3PTYDIR)
+
+$(3PTYDIR):
+	mkdir $(3PTYDIR)
+
+3ptylibs-clean:
+	$(RM) -r $(3PTYDIR)
+
+$(MODULE_LIB_FFI): | $(3PTYDIR)
+	cd $(3PTYDIR) && tar xzf $(APPS_DIR)/public/libs/libffi-3.2.1.tar.gz
+	cd $(3PTYDIR)/libffi-3.2.1 && \
+	CC=$(CC) CXX=$(CXX) CFLAGS="-m32" CXXFLAGS="-m32" ./configure --prefix=$(CURDIR)/$(3PTYDIR)
+	$(MAKE) -C $(3PTYDIR)/libffi-3.2.1 install
+
+$(MODULE_LIB_GLIB): $(MODULE_LIB_FFI) | $(3PTYDIR)
+	cd $(3PTYDIR) && tar xzf $(APPS_DIR)/public/libs/glib-2.41.1.tar.gz
+	cd $(3PTYDIR)/glib-2.41.1 && \
+	CC=$(CC) CXX=$(CXX) CFLAGS="-m32" CXXFLAGS="-m32" ./configure \
+		--prefix=$(CURDIR)/$(3PTYDIR) \
+		--disable-dtrace \
+		glib_cv_stack_grows=no \
+		glib_cv_uscore=no \
+		ac_cv_func_posix_getpwuid_r=yes \
+		ac_cv_func_posix_getgrgid_r=yes \
+		ac_cv_path_GLIB_COMPILE_RESOURCES=$(CURDIR)/$(3PTYDIR)/glib-2.41.1/compile_necessary/glib-compile-resources \
+		ac_cv_path_GLIB_GENMARSHAL=$(CURDIR)/$(3PTYDIR)/glib-2.41.1/compile_necessary/glib-genmarshal \
+		ac_cv_path_GLIB_COMPILE_SCHEMAS=$(CURDIR)/$(3PTYDIR)/glib-2.41.1/compile_necessary/glib-compile-schemas \
+		LIBFFI_CFLAGS="-I$(CURDIR)/$(3PTYDIR)/lib/libffi-3.2.1/include" \
+		LIBFFI_LIBS="-L$(CURDIR)/$(3PTYDIR)/lib -L$(CURDIR)/$(3PTYDIR)/lib32 -lffi"
+	$(MAKE) -C $(3PTYDIR)/glib-2.41.1 install
+
+
+##########################################################################
+### for coverage of UT
+ggcov: 
+	@echo "======================================================"
+	@echo " UT coverage report generation"
+	@echo "======================================================"
+	lcov --capture --gcov-tool $(GCOV) --directory $(OBJDIR) --config-file lcovrc --output-file ut_tmp.info && \
+	lcov --remove ut_tmp.info "$(CURDIR)/$(UTSRCDIR)/*" "$(HOST_TOOLS)/include/*" "$(UT_ENVIRONMENT)/include/gtest/*" --config-file lcovrc -o ut.info && \
+	genhtml ut.info --config-file lcovrc --output-directory ut_report --title "antennaMgr UT" --show-details -p "$$topdir"
+	@echo "======================================================"
+	@echo " UT coverage report generated"
+	@echo "======================================================"
+	@echo
+
+ggcov-clean: covxml-clean
+	$(RM) *.info
+	$(RM) -r ut_report
+	$(RM) -r $(OBJDIR)/*.gcda
+
+covxml:
+	cd .. && curdir=$$PWD && $(GCOVR) -x -r $$curdir -e "ut/"> ut/coverage.xml
+
+covxml-clean:
+	$(RM) coverage.xml
+
+##########################################################################

@@ -1,0 +1,424 @@
+#ALU01890971 ShenYunliang R2.x add a new cfgmgr callback function OVS object verification system
+
+
+.NOTPARALLEL:
+TOP_DIR := $(shell git rev-parse --show-toplevel)
+
+include $(TOP_DIR)/depend.mk
+
+LIBS_DIR := $(TOP_DIR)/Mgnt/OAMCore/libs
+INCLUDE_DIR := $(TOP_DIR)/Mgnt/OAMCore/inc
+OAMCORE_DIR := $(TOP_DIR)/Mgnt/OAMCore
+#CFGMQTT_DIR := $(TOP_DIR)/Mgnt/OAMCore/cfgmgr_mqtt/include
+ENCRYPT_TOOL=$(TOP_DIR)/Mgnt/OAMCore/libs/cs_crypto/tools/bin/auto_crypto
+CRYPTO_TOOL=$(TOP_DIR)/Mgnt/OAMCore/libs/cs_crypto/tools/bin/cryptfile_pre
+CRYPTO_DIR := $(TOP_DIR)/Mgnt/OAMCore/libs/cs_crypto
+INSTALL_USR_BIN = $(ROOTFS_DIR)/usr/bin
+INSTALL_USR_LIB = $(ROOTFS_DIR)/usr/lib
+INSTALL_ETC_DIR = $(ROOTFS_DIR)/etc
+INSTALL_INIT_DIR = $(ROOTFS_DIR)/etc/init.d
+INSTALL_RC_DIR = $(ROOTFS_DIR)/etc/rc.d
+
+AONT_VOIP := n
+CFG_TR181 := y
+
+ifneq (, $(findstring 5GReceiver-HG-1, $(product)))
+	RTS_DIR = rts_forODU
+else
+	RTS_DIR = rts
+endif
+
+DBM_DIR = dbmtools
+
+COMMON_CFLAGS += -I$(SDKTARGETSYSROOT)/usr/include
+COMMON_CFLAGS += -I$(SDKTARGETSYSROOT)/usr/include/upnp
+COMMON_CFLAGS += -I$(SDKTARGETSYSROOT)/usr/include/libubox
+#type 5G CPE
+ifeq ($(CFG_HTTP_5G_CPE), y)
+COMMON_CFLAGS += -DFIVEG_CPE
+endif
+
+ifneq (, $(findstring 5GReceiver-HG-1, $(product)))
+	COMMON_CFLAGS += -DNEW_RGW_FRAMEWORK -DNO_MESH_SUPPORT -DNOMESHCTL -DHAVE_WIFIMGR
+endif
+
+ifneq (, $(findstring 5GGW3-OMNI-1, $(product)))
+	COMMON_CFLAGS += -DNO_MESH_SUPPORT -DHAVE_WIFIMGR -DWIFIMGR_TMP -DNOMESHCTL
+	COMMON_CFLAGS += -I../lib/export
+else
+	COMMON_CFLAGS += -I$(LIBS_DIR)/wlandrv/export
+endif
+
+ifeq (, $(findstring 5GReceiver-HG-1, $(product)))
+	WLAN_CFLAGS += -DHAVE_WIFI -DHAVE_WLANDRV
+endif
+
+ifeq ($(WIFIRADIO), TRI_BAND)
+	WLAN_CFLAGS  +=-DTRI_BAND
+else
+	WLAN_CFLAGS  +=-DDUAL_BAND
+endif
+COMMON_CFLAGS += $(WLAN_CFLAGS)
+COMMON_CFLAGS += -DXMPP_SUPPORT
+COMMON_CFLAGS += -Os -fPIC -fomit-frame-pointer -Wall -DCFG_APP_RPC -DENABLE_DEBUG #-Werror
+COMMON_CFLAGS += -I../inc	\
+	-I$(INCLUDE_DIR) \
+	-I$(LIBS_DIR)/zlib	\
+	-I$(LIBS_DIR)/cs_crypto/export	\
+	-I$(LIBS_DIR)/libnal/export	\
+	-I$(TOP_DIR)/Mgnt/OAMCore/cfgmgr_mqtt/include \
+        -I$(TOP_DIR)/MW/CSL/logger/include \
+        -I$(TOP_DIR)/MW/CSL/logger/ \
+        -I$(TOP_DIR)/MW/CSL/common \
+	-I$(LIBS_DIR)/idl2json/cjson \
+	-I$(LIBS_DIR)/openssl/include \
+	-I$(LIBS_DIR)/ubus-tools/export\
+	-I./obj2json\
+	-I$(TOP_DIR)/Services/EasyMesh/export\
+	-I$(TOP_DIR)/Mgnt/OAMCore/nsb_timer \
+	-I$(TOP_DIR)/MW/HAL/HAL_HwInfo \
+    -I$(TOP_DIR)/MW/CSL/sysevent/source/include \
+	-I$(TOP_DIR)/Mgnt/OAMCore/cfgmgr_dbm/include 
+
+
+ifneq ($(product),ODU)
+COMMON_CFLAGS += -I$(SERVICES_DIR)/RGW/export/rgw
+COMMON_CFLAGS += -I$(SERVICES_DIR)/RGW/export/pc
+endif
+
+CFGMGR_LDFLAGS +=  -L$(INSTALL_USR_LIB) -lz -lixml -lcs_util \
+	           -lcrypto -lssl -lcjson -lnsb_timer -lctimer -lcfgmgr_mqtt -ldm -lhwinfo -lfdb\
+		   -L$(SDKTARGETSYSROOT)/usr/lib \
+	           -lcs_crypto -ljson-c -lsimplelib -lstdc++ -lpcd -lipc -lmosquitto -lrdkloggers -llog4c -lcommon -lsysevent -luci \
+
+ifeq (, $(findstring 5GReceiver-HG-1, $(product)))
+	CFGMGR_LDFLAGS += -lnubus -lNIL_Analytics -lnal
+	CFGMGR_LDFLAGS += -lrgw_impl
+    COMMON_CFLAGS += -DSUPPORT_PARENTALCTL
+endif
+
+
+ifneq (, $(filter $(ARCH), x86-64 x86-32))
+  ifeq ($(ARCH), x86-64)
+    COMMON_CFLAGS += -DNO_MESH_SUPPORT
+    CFGMGR_LDFLAGS += -lunwind
+  endif
+  ifeq ($(ARCH), x86-32)
+    COMMON_CFLAGS += -DNOMESHCTL
+  endif
+else
+  ifneq ($(product),5GReceiver-HG-1)
+	CFGMGR_LDFLAGS += -lnilecd
+  endif
+CFGMGR_LDFLAGS += -lunwind-arm
+endif
+
+CFGMGR_LDFLAGS += -L$(SDKTARGETSYSROOT)/usr/lib -lubox -lubus -lblobmsg_json
+CFGMGR_LDFLAGS += -Wl,-rpath-link=$(INSTALL_USR_LIB)
+CFGMGR_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/usr/lib
+CFGMGR_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/../toolchain/lib
+#CFGMGR_LDFLAGS += -L$(LIBS_DIR)/zlib -lz \
+	        -L$(LIBS_DIR)/libixml -lixml \
+	        -L$(LIBS_DIR)/openssl/lib -lcrypto -lssl \
+	        -L$(LIBS_DIR)/cs_crypto/src -lcs_crypto -lcs_util \
+
+ifeq (, $(findstring 5GReceiver-HG-1, $(product)))
+CFGMGR_LDFLAGS += -lwldrv -lrgw_sal -lrgwjson -lpc_sal
+endif
+
+ifneq (, $(findstring 5GGW3-OMNI-1, $(product)))
+CFGMGR_LDFLAGS += -L../lib/ -lwldrv -lrpc_wldrv
+endif
+
+ifeq ($(CFG_TR181),y)
+	COMMON_CFLAGS += -I$(OAMCORE_DIR)/mapper -DTR181
+endif
+
+
+
+
+# build all src/*.c object rule
+RTS_SOURCE = $(wildcard $(RTS_DIR)/*.c)
+SRC_SOURCE := $(wildcard *.c)
+TMP_OBJ = $(patsubst %.c, %.o, $(SRC_SOURCE))
+SRC_OBJ := $(addprefix obj/, $(TMP_OBJ))
+obj/%.o : %.c
+	$(CC) -c $(COMMON_CFLAGS) $(CFLAGS) $(VOICE_CFLAGS) -o $@ $<
+
+# build all src/rts/*.c objectes rule, and depends on platform 5113 or 5115.
+TMP_OBJ = $(patsubst %.c, %.o, $(RTS_SOURCE))
+TM2_OBJ = $(subst $(RTS_DIR)/, $(RTS_DIR)/obj/, $(TMP_OBJ))
+EXL_OBJ = $(RTS_DIR)/obj/rut_wanstate.o
+RTS_OBJ := $(filter-out $(EXL_OBJ), $(TM2_OBJ))
+$(RTS_DIR)/obj/%.o : $(RTS_DIR)/%.c
+	$(CC) -c $(COMMON_CFLAGS) $(CFLAGS) $(VOICE_CFLAGS) -o $@ $<
+
+
+#build src/cfg_restore/*.c objectes rule
+CFG_RESTORE_SOURCE = $(wildcard cfg_restore/*.c)
+TMP_OBJ = $(patsubst %.c, %.o, $(CFG_RESTORE_SOURCE))
+EXL_OBJ = cfg_restore/cfg_genversion.o
+TM2_OBJ = $(filter-out $(EXL_OBJ), $(TMP_OBJ))
+CFG_RESTORE_OBJ := $(subst cfg_restore/, cfg_restore/obj/, $(TM2_OBJ))
+cfg_restore/obj/%.o : cfg_restore/%.c
+	$(CC) -c $(COMMON_CFLAGS) $(CFLAGS) $(VOICE_CFLAGS) -o $@ $<
+
+# add by Shen Yunliang 20151208 ALU02155286, reason: DB migration2
+# build src/cfg_db_migration2/*.c objects rule
+#CFG_DB_MIGRATION2_SOURCE = $(wildcard cfg_db_migration2/*.c)
+#TMP_OBJ = $(patsubst %.c, %.o, $(CFG_DB_MIGRATION2_SOURCE))
+#CFG_DB_MIGRATION2_OBJ := $(subst cfg_db_migration2/, cfg_db_migration2/obj/, $(TMP_OBJ))
+#cfg_db_migration2/obj/%.o : cfg_db_migration2/%.c
+#	$(CC) -c $(COMMON_CFLAGS) -o $@ $<
+
+RTS_SCHED_SOURCE = $(wildcard $(RTS_DIR)/rts_sched/*.c)
+TMP_OBJ = $(patsubst %.c, %.o, $(RTS_SCHED_SOURCE))
+RTS_SCHED_OBJ := $(subst $(RTS_DIR)/rts_sched/, $(RTS_DIR)/rts_sched/obj/, $(TMP_OBJ))
+$(RTS_DIR)/rts_sched/obj/%.o : $(RTS_DIR)/rts_sched/%.c
+	$(CC) -c $(COMMON_CFLAGS) $(CFLAGS) -o $@ $<
+
+# add by tao yunchao for sync data to extender
+OBJ_TO_JSON_SOURCE = $(wildcard obj2json/*.c)
+TMP_OBJ = $(patsubst %.c, %.o, $(OBJ_TO_JSON_SOURCE))
+OBJ_TO_JSON_OBJ := $(subst obj2json/, obj2json/obj/, $(TMP_OBJ))
+obj2json/obj/%.o : obj2json/%.c
+	$(CC) -c $(COMMON_CFLAGS) $(CFLAGS) -o $@ $<
+
+TEST_OBJ = ../tester/obj/testlib.o
+../tester/obj/%.o : ../tester/%.c
+	$(CC) -c $(COMMON_CFLAGS) $(CFLAGS) -o $@ $<
+
+DBMTOOL_OBJ = dbmtools/dbmtool.o
+# build all dbmtool//*.c objectes rule
+$(DBM_DIR)/%.o : $(DBM_DIR)/%.c
+	$(CC) -c $(COMMON_CFLAGS) $(CFLAGS) -o $@ $<
+
+#
+#targets
+#
+OBJ_DIRS =  obj $(RTS_DIR)/obj  cfg_restore/obj  ../tester/obj $(RTS_DIR)/rts_sched/obj obj2json/obj
+CFGMGR = cfgmgr
+LIBCFG = libcfg.so
+LIBCFGBASE = libcfgbase.so
+LIBCFGBASEXML = libcfgbasexml.so
+CFGCLI = cfgcli
+DBMTOOL = translate
+TEST   = test
+ALL_OBJ = $(SRC_OBJ) $(RTS_OBJ) $(CFG_RESTORE_OBJ) $(RTS_SCHED_OBJ) $(OBJ_TO_JSON_OBJ)
+
+EXL_OBJ = obj/cfg_dst.o \
+	  obj/cfg_midware.o obj/cfg_dump.o obj/cfg_dump181.o \
+	  cfg_restore/obj/cfg_restore_api.o obj/cfg_dump181.o cfg_rgw_dump.o cfg_rgw_api.o
+CFGMGR_OBJ = $(filter-out $(EXL_OBJ), $(ALL_OBJ))
+
+LIBCFGBASE_OBJ = obj/cfg_base_api.o obj/cfg_rpc_api.o
+LIBCFGBASEXML_OBJ = obj/cfg_base_api.o obj/cfg_xml_api.o obj/cfg_rpc_api.o
+LIBCFG_OBJ = obj/cfg_api.o obj/_system.o obj/cfg_debug.o cfg_restore/obj/cfg_restore_api.o
+
+CFGCLI_OBJ = obj/cfg_dump.o obj/cfg_dump181.o obj/_system.o obj/cfg_rgw_dump.o  obj/cfg_rgw_api.o
+
+CFGCLI_LDFLAGS =  -L. -lcfg  -lcfgbasexml -lz \
+	              -lcrypto -lssl -lnsb_timer \
+	              -L$(INSTALL_USR_LIB) -lcs_util -lcjson \
+                  -L$(SDKTARGETSYSROOT)/usr/lib -lcs_crypto \
+                  -lcrypto -lssl \
+                  -L$(LIBS_DIR)/cs_crypto/src -lcs_crypto -lstdc++ -lmosquitto -lrdkloggers -llog4c -lcommon -lfdb -lhwinfo
+
+ifeq (, $(findstring 5GReceiver-HG-1, $(product)))
+CFGCLI_LDFLAGS += -lwldrv -lrgwjson
+endif
+
+CFGCLI_LDFLAGS += -Wl,-rpath-link=$(INSTALL_USR_LIB)
+CFGCLI_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/usr/lib
+CFGCLI_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/../toolchain/lib
+TEST_LDFLAGS =  -L./  -lcfg -lcfgbase -lz
+
+DBMTOOL_LDFLAGS =  -L. -lcfg  -lcfgbase -lz \
+	               -L$(INSTALL_USR_LIB) -ljson-c -lcjson \
+                  -L$(SDKTARGETSYSROOT)/usr/lib \
+                  -lcommon -lsimplelib -lrdkloggers -llog4c
+
+DBMTOOL_LDFLAGS += -Wl,-rpath-link=$(INSTALL_USR_LIB)
+DBMTOOL_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/usr/lib
+DBMTOOL_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/../toolchain/lib
+
+all:  sshscript $(OBJ_DIRS) datamodel $(CFGMGR) $(LIBCFGBASE) $(LIBCFGBASEXML) $(LIBCFG) $(CFGCLI) $(DBMTOOL)
+	@echo building all
+
+sshscript:
+		install -c -m 777 change_pass.sh $(INSTALL_USR_BIN)
+
+ifeq (, $(findstring 5GReceiver-HG-1, $(product)))
+CODEGEN = $(LIBS_DIR)/ubus-tools/tools/codegen/codegen_main.py
+XML_DIR = ../xml
+.PHONY:ubus_gen
+ubus_gen:
+	python $(CODEGEN) --config-xml $(XML_DIR)/config.xml --output-file codegen --header $(XML_DIR)/header.xml --xml-dir $(XML_DIR)/itf --interested-signal-xml $(XML_DIR)/interested_signal.xml
+endif
+.PHONY:json_gen
+json_gen:
+	$(MAKE) -C obj2json
+
+$(OBJ_DIRS):
+	@echo building OBJ_DIRS
+	@echo $(OBJ_DIRS)
+	@mkdir -pv $@
+
+datamodel: $(OBJ_DIRS)
+	@echo building datamodel ...
+	@$(ENCRYPT_TOOL) encryption_node.xml
+	@./autogen datamodel.xml.encryption
+	@./shm_autogen datamodel.xml.encryption ./cfg_shared_memory/omci_nodes.xml ./cfg_shared_memory/web_cfg.xml
+	@mv -v cfg_obj.h ../inc
+	@mv -v cfg_maskobj.h ../inc
+	@mv -v rts.h ../inc
+	@mv -v stl.h ../inc
+	@mv -v ovs.h ../inc
+	@mv -v cfg_shm.h ../inc
+	@mv -v cfg_shm.c ./cfg_shared_memory/
+	@mv -v _shm_type.h ../inc
+	@mv -v cfg_shm_init.h  ../inc
+	@mv -v cfg_shm_init.c ./cfg_shared_memory/
+	gcc $(CRYPTO_DIR)/tools/cryptfile.c $(CRYPTO_DIR)/src/cs_crypto.c $(CRYPTO_DIR)/src/cs_base64.c $(CRYPTO_DIR)/src/cs_sha.c $(CRYPTO_DIR)/src/cs_staticversion.c \
+    	$(CRYPTO_DIR)/src/cs_aes.c $(CRYPTO_DIR)/src/cs_pkcs7pad.c -I $(CRYPTO_DIR)/export -I $(CRYPTO_DIR)/include -lssl -lcrypto -o $(CRYPTO_TOOL)
+	@$(CRYPTO_TOOL) -i ./preconfiguration_global.xml.encryption -o ./preconfiguration_global.xml.encryption.crypto
+	cp -Rfv datamodel.xml.encryption $(INSTALL_ETC_DIR)/datamodel.xml
+	cp -Rfv preconfiguration_global.xml.encryption.crypto $(INSTALL_ETC_DIR)/preconfiguration_global.xml
+	cp -Rfv DataMigration.json $(INSTALL_ETC_DIR)/hb/DataMigration.json
+	cp -Rfv dbversion $(INSTALL_ETC_DIR)/
+	cp cfg_obj.c $(TOP_DIR)/Mgnt/OAMCore/cfgmgr_dbm/
+	sed '/rts_/d;/stl_/d;/ovs_/d'  $(TOP_DIR)/Mgnt/OAMCore/cfgmgr_dbm/cfg_obj.c  > $(TOP_DIR)/Mgnt/OAMCore/cfgmgr_dbm/cfg_obj.c.tmp
+	mv $(TOP_DIR)/Mgnt/OAMCore/cfgmgr_dbm/cfg_obj.c.tmp $(TOP_DIR)/Mgnt/OAMCore/cfgmgr_dbm/cfg_obj.c
+
+PREPARE:
+ifneq (, $(filter $(ARCH), x86-64 x86-32))
+	@echo Stub preparing ...
+	@rm -rf obj/cfg_boot.o
+	$(CC) -c $(COMMON_CFLAGS) $(TOP_DIR)/Stub/cfgboot/cfg_boot.c -o obj/cfg_boot.o
+else
+	@echo Nothing need to prepare for target
+endif
+
+
+$(CFGMGR) : PREPARE $(OBJ_DIRS) $(CFGMGR_OBJ)
+	@echo building $(CFGMGR)
+	$(CC) -o  $@ $(CFGMGR_OBJ) -fPIC $(CFGMGR_LDFLAGS) $(BIN_LDFLAGS) -znow -zrelro
+	install -c -m 777 $(CFGMGR) $(INSTALL_USR_BIN)
+
+
+LIBCFG_CFLAGS = -Os -fPIC
+LIBCFGBASE_CFLAGS = -Os
+LIBCFGBASE_CFLAGS += -I$(TOP_DIR)/Services/EasyMesh/export
+LIBCFGBASEXML_CFLAGS = -Os
+LIBCFG_LDFLAGS +=  -L$(INSTALL_USR_LIB) -lz -lixml -lcfgbase -lcs_util \
+	              -lcrypto -lssl \
+	              -L$(INSTALL_USR_LIB) \
+		        -L$(SDKTARGETSYSROOT)/usr/lib \
+	           -lcs_crypto -ljson-c -lsimplelib -lstdc++ -lpcd -lipc\
+
+ifneq (, $(filter $(ARCH), x86-64 x86-32))
+  ifeq ($(ARCH), x86-64)
+    LIBCFG_LDFLAGS += -lunwind
+  endif
+else
+  ifneq ($(product),5GReceiver-HG-1)
+	LIBCFG_LDFLAGS += -lnilecd
+  endif
+  LIBCFG_LDFLAGS += -lunwind-arm
+endif
+
+LIBCFGBASEXML_LDFLAGS +=  -L$(INSTALL_USR_LIB) -lz -lixml -lcs_util \
+	              -lcrypto -lssl \
+	              -L$(INSTALL_USR_LIB) \
+		        -L$(SDKTARGETSYSROOT)/usr/lib \
+	           -lcs_crypto -ljson-c -lsimplelib -lstdc++ -lpcd -lipc
+
+ifneq (, $(filter $(ARCH), x86-64 x86-32))
+ifeq ($(ARCH), x86-64)
+LIBCFGBASEXML_LDFLAGS += -lunwind
+LIBCFGBASEXML_CFLAGS += -DNO_MESH_SUPPORT
+endif
+else
+LIBCFGBASEXML_LDFLAGS += -lunwind-arm
+endif
+LIBCFGBASEXML_LDFLAGS += -lhwinfo -lfdb
+
+ifeq (, $(findstring 5GReceiver-HG-1, $(product)))
+LIBCFG_LDFLAGS += -lwldrv -lubus
+LIBCFGBASEXML_LDFLAGS += -lwldrv -lubus
+endif
+
+LIBCFGBASE_LDFLAGS +=  -L$(INSTALL_USR_LIB) -lz -lixml -lcs_util \
+	              -lcrypto -lssl \
+	              -L$(INSTALL_USR_LIB) \
+		        -L$(SDKTARGETSYSROOT)/usr/lib \
+	           -lcs_crypto -ljson-c -lsimplelib -lstdc++ -lpcd -lipc -lhwinfo -lfdb\
+
+ifneq (, $(filter $(ARCH), x86-64 x86-32))
+  ifeq ($(ARCH), x86-64)
+    LIBCFGBASE_LDFLAGS += -lunwind
+  endif
+else
+  ifneq ($(product),5GReceiver-HG-1)
+    LIBCFGBASE_LDFLAGS += -lnilecd
+  endif
+  LIBCFGBASE_LDFLAGS += -lunwind-arm
+endif
+
+ifeq (, $(findstring 5GReceiver-HG-1, $(product)))
+LIBCFGBASE_LDFLAGS += -lwldrv -lubus
+LIBCFGBASEXML_LDFLAGS += -lwldrv -lubus
+endif
+
+ifneq (, $(findstring 5GGW3-OMNI-1, $(product)))
+LIBCFGBASE_LDFLAGS += -lwldrv -lubus
+LIBCFGBASEXML_LDFLAGS += -lwldrv -lubus
+endif
+
+LIBCFG_LDFLAGS += -Wl,-rpath-link=$(INSTALL_USR_LIB)
+LIBCFG_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/usr/lib
+LIBCFG_LDFLAGS += -Wl,-rpath-link=$(SDKTARGETSYSROOT)/../toolchain/lib
+
+$(LIBCFGBASE) : $(LIBCFGBASE_OBJ)
+	@echo building LIBCFGBASE
+	$(CC) $(LIBCFGBASE_CFLAGS) $(COMMON_CFLAGS) $(LIBCFGBASE_OBJ)  $(LIBCFGBASE_LDFLAGS) $(LDFLAGS) -shared -fPIC -Wl,-soname,$@ -o $@
+	install -c -m 777 $(LIBCFGBASE) $(INSTALL_USR_LIB)
+
+$(LIBCFGBASEXML) : $(LIBCFGBASEXML_OBJ)
+	@echo building LIBCFGBASEXML
+	$(CC) $(LIBCFGBASEXML_CFLAGS) $(LIBCFGBASEXML_OBJ)  $(LIBCFGBASEXML_LDFLAGS) $(LDFLAGS) -shared -fPIC -Wl,-soname,$@ -o $@
+	install -c -m 777 $(LIBCFGBASEXML) $(INSTALL_USR_LIB)
+
+$(LIBCFG) : $(OBJ_DIRS) $(LIBCFG_OBJ)
+	@echo building LIBCFG
+	$(CC) $(LIBCFG_CFLAGS) $(LIBCFG_OBJ)  $(LIBCFG_LDFLAGS) $(LDFLAGS) -shared -Wl,-soname,$@ -o $@
+	install -c -m 777 $(LIBCFG) $(INSTALL_USR_LIB)
+
+$(CFGCLI) : $(OBJ_DIRS) $(CFGCLI_OBJ)
+	@echo building CFGCLI
+	$(CC) -o $@ $(CFGCLI_OBJ) $(CFGCLI_LDFLAGS) -fPIC $(BIN_LDFLAGS) $(LDFLAGS)
+	install -c -m 777 $(CFGCLI) $(INSTALL_USR_BIN)
+	ln -sf $(CFGCLI) $(INSTALL_USR_BIN)/tr181
+	ln -sf $(CFGCLI) $(INSTALL_USR_BIN)/dmcli
+
+$(TEST) : $(OBJ_DIRS) $(TEST_OBJ)
+	@echo building TEST
+	$(CC) -o $@ $(TEST_OBJ) $(TEST_LDFLAGS) $(BIN_LDFLAGS) $(LDFLAGS)
+
+$(DBMTOOL) : $(OBJ_DIRS) $(DBMTOOL_OBJ)
+	@echo building DBMTOOL
+	$(CC) -o $@ $(DBMTOOL_OBJ) $(DBMTOOL_LDFLAGS) -fPIC $(BIN_LDFLAGS) $(LDFLAGS)
+	install -c -m 777 $(DBMTOOL) $(INSTALL_USR_BIN)
+
+install:
+	@echo "install cfgmgr binary"
+
+
+clean:
+	@$(RM) -vrf $(CFGMGR) $(LIBCFGBASE) $(LIBCFGBASEXML) $(LIBCFG) $(CFGCLI) $(DBMTOOL) \
+	cfg_restore/cfg_version.h $(OBJ_DIRS) \
+	cfg_obj.c rts.c.auto stl.c.auto ovs.c.auto ../inc/{cfg_obj.h,rts.h,stl.h,ovs.h,cfg_maskobj.h}
+	@$(RM) -f *.gc* *.d* *.h codegen.*
+	$(MAKE) -C obj2json clean
+
+sinclude $(ALL_OBJ:%.o=%.d)

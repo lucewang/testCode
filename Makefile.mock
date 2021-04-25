@@ -1,0 +1,302 @@
+TOP_DIR ?= $(shell hg root)
+ifeq ($(TOP_DIR),)
+TOP_DIR := $(realpath ../../../../../..)
+endif
+
+APPS_DIR := $(TOP_DIR)/apps
+
+UT_ENVIRONMENT ?= /opt/tools/ut_environment
+OPMOCK_DIR := $(UT_ENVIRONMENT)/opmock2/support
+OPMOCK_CMD := $(UT_ENVIRONMENT)/opmock2/opmock2
+
+HOST_TOOLS ?= /repo/host-tools/gcc-5.3
+
+CC   := $(HOST_TOOLS)/bin/gcc
+CXX  := $(HOST_TOOLS)/bin/g++
+AR   := $(HOST_TOOLS)/bin/ar
+
+CPPFLAGS := -I$(UT_ENVIRONMENT)/include -I$(OPMOCK_DIR)
+CFLAGS   := -m32 -g -O0 -Wall -std=gnu89 -fprofile-arcs -ftest-coverage
+CXXFLAGS := -m32 -g -O0 -Wall -std=c++11 -fprofile-arcs -ftest-coverage
+
+
+CPPFLAGS += -DHOST
+
+# The googletest in /opt was compiled using old C++ ABI
+# Since recompiling it would break older UT of other modules,
+# we will use older ABI here instead
+CPPFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
+
+
+GENDIR := gen
+SRCDIR := src
+OBJDIR := obj
+LIBDIR := lib
+3PTYDIR:= 3pty
+
+
+EXTRA_CFLAGS += \
+        -Wextra \
+        -Wwrite-strings -Wmissing-declarations -Wmissing-prototypes \
+        -Wdeclaration-after-statement -Wstrict-prototypes \
+        -fno-strict-aliasing -Wno-deprecated-declarations \
+        -Wint-to-pointer-cast -Wfloat-equal -Wno-unused-parameter \
+        -Wno-sign-compare -Wunused-but-set-variable -Wundef \
+        -Wimplicit-function-declaration -Wpointer-arith -Winit-self \
+        -Wshadow -Wmissing-include-dirs -Waggregate-return -Wformat-security \
+        -Wtype-limits \
+        -Werror
+
+EXTRA_CXXFLAGS += -pedantic -Wextra -Werror -Wno-variadic-macros
+
+GLIB_DIR := $(APPS_DIR)/public/libs/glib-2.41.1
+3PTY_INSTDIR := $(realpath ../$(3PTYDIR))
+LIBQMI_PKG := $(APPS_DIR)/public/libs/libqmi-1.20.0.tar.gz
+LIBQMI_DIR := $(3PTYDIR)/libqmi-1.20.0/src/libqmi-glib
+LIBQMI := $(LIBQMI_DIR)/.libs/libqmi-glib.a
+
+CPPFLAGS += -I. \
+            -I.. \
+            -I../include \
+            -I./include \
+            -I./gen \
+            -I$(APPS_DIR)/public/include \
+            -I$(APPS_DIR)/public/include/linux \
+            -I$(APPS_DIR)/private/libs/timer \
+            -I$(TOP_DIR)/include \
+            -I$(TOP_DIR)/sysdrivers/gpio_mgr \
+            -I$(GLIB_DIR) \
+            -I$(GLIB_DIR)/gmodule \
+            -I$(GLIB_DIR)/glib \
+            -I$(APPS_DIR)/public/include/libqmi-glib \
+            -I$(APPS_DIR)/private/appkgs/usbbridge/include \
+            -I$(APPS_DIR)/private/appkgs/cfgmgr_ms/inc
+
+GEN_C   := $(GENDIR)/cs_log_stub.c \
+           $(GENDIR)/cs_msg_stub.c \
+           $(GENDIR)/cs_mem_stub.c \
+           $(GENDIR)/cs_tms_stub.c \
+           $(GENDIR)/gpio_mgr_stub.c \
+           $(GENDIR)/qmi-device_stub.c \
+           $(GENDIR)/qmi-client.c \
+           $(GENDIR)/qmi-dms_stub.c \
+           $(GENDIR)/qmi-nas_stub.c \
+           $(GENDIR)/qmi-enum-types.c \
+           $(GENDIR)/qmi-error-types.c \
+           $(GENDIR)/qmi-error-quarks.c \
+           $(GENDIR)/cfg_api_stub.c \
+           $(GENDIR)/timer_stub.c
+GEN_OBJS = $(addprefix $(OBJDIR)/,$(notdir $(GEN_C:.c=.o)))
+CPPFLAGS += -DLIBQMI_GLIB_COMPILATION
+
+CC_SRCS := $(wildcard $(SRCDIR)/*.cc)
+C_SRCS  := $(wildcard $(SRCDIR)/*.c)
+CC_OBJS := $(addprefix $(OBJDIR)/,$(notdir $(CC_SRCS:.cc=.o)))
+C_OBJS  := $(addprefix $(OBJDIR)/,$(notdir $(C_SRCS:.c=.o)))
+OBJS     = $(GEN_OBJS) $(CC_OBJS) $(C_OBJS) 
+
+
+LIBGENSTUBS = $(LIBDIR)/libgenstubs.a
+
+CPPFLAGS += -MMD
+
+##########################################################################
+.NOTPARALLEL :
+
+all : dirs libs
+
+##########################################################################
+.PHONY: info
+info:
+	@echo "CC    = $(CC)"
+	@echo "CXX   = $(CXX)"
+	@echo "AR    = $(AR)"
+	@echo "RM    = $(RM)"
+	@echo "CFLAGS   = $(CFLAGS)"
+	@echo "CXXFLAGS = $(CXXFLAGS)"
+	@echo "CPPFLAGS = $(CPPFLAGS)"
+	@echo "GENDIR = $(GENDIR)"
+	@echo "SRCDIR = $(SRCDIR)"
+	@echo "OBJDIR = $(OBJDIR)"
+	@echo "LIBDIR = $(LIBDIR)"
+	@echo "GEN_C    = $(GEN_C)"
+	@echo "GEN_OBJS = $(GEN_OBJS)"
+	@echo "CC_SRCS  = $(CC_SRCS)"
+	@echo "C_SRCS   = $(C_SRCS)"
+	@echo "OBJS     = $(OBJS)"
+	@echo "LIBGENSTUBS  = $(LIBGENSTUBS)"
+
+##########################################################################
+clean:
+	$(RM) -r $(LIBDIR)
+	$(RM) -r $(OBJDIR) $(GENDIR) $(3PTYDIR)
+
+dirs: | $(GENDIR) $(OBJDIR) $(3PTYDIR) $(LIBDIR)
+
+libs: $(LIBGENSTUBS)
+
+$(LIBGENSTUBS): $(OBJS) | $(LIBDIR)
+	$(AR) rcs $@ $^
+
+##########################################################################
+$(LIBDIR):
+	mkdir $(LIBDIR)
+
+$(GENDIR): 
+	mkdir $(GENDIR)
+
+$(OBJDIR):
+	mkdir $(OBJDIR)
+
+$(3PTYDIR):
+	mkdir $(3PTYDIR)
+
+$(GEN_OBJS): $(OBJDIR)/%.o: $(GENDIR)/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(C_OBJS): $(OBJDIR)/%.o: $(SRCDIR)/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(CC_OBJS): $(OBJDIR)/%.o: $(SRCDIR)/%.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+##########################################################################
+### libqmi - generated sources
+
+$(LIBQMI_DIR): $(LIBQMI_PKG) | $(3PTYDIR)
+	cd $(3PTYDIR) && tar -xzf $<
+
+$(LIBQMI): | $(LIBQMI_DIR)
+# Following is not needed for now, because the libqmi package
+# already contains generated files and even libraries (arm though,
+# unsuitable for UT anyway). Apparently this is by mistake; 
+# There should be sources only instead, then following lines will be
+# needed to generate files
+#	cd $(LIBQMI_DIR)/../.. && \
+	CC=$(CC) CXX=$(CXX) CFLAGS="-m32" CXXFLAGS="-m32" ./configure \
+		--prefix=$(CURDIR)/$(3PTYDIR) \
+		--without-udev \
+		--includedir="$(APPS_DIR)/public/include" \
+		--datadir=$(APPS_DIR)/public/libs \
+		GLIB_CFLAGS="-I$(3PTY_INSTDIR)/include/glib-2.0 \
+		             -I$(3PTY_INSTDIR)/lib/glib-2.0/include \
+		             -I$(3PTY_INSTDIR)/include/gio-unix-2.0" \
+		GLIB_LIBS="-L$(3PTY_INSTDIR)/lib -lglib-2.0 -lgio-2.0"
+#	cd $(LIBQMI_DIR)/../.. && make
+
+##########################################################################
+### Generated stub sources
+
+$(GENDIR)/cs_log_stub.c:
+	$(OPMOCK_CMD) -i="$(APPS_DIR)/public/include/cs_log.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -s=vlog_log \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+$(GENDIR)/cs_msg_stub.c:
+	$(OPMOCK_CMD) -i="${APPS_DIR}/public/include/cs_msg.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+$(GENDIR)/cs_mem_stub.c:
+	if grep -q '^\#include <cs.h>' ${APPS_DIR}/public/include/cs_mem.h; then \
+		echo '*** No need to fix cs_mem.h ***'; \
+	else \
+		echo '*** Need to fix cs_mem.h ***'; \
+		sed -i '/^\#define __CS_MEM_H__/a \#include <cs.h>  // AntennaMgr UT workaround' ${APPS_DIR}/public/include/cs_mem.h; \
+		sed -i '/^\#define __CS_MEM_H__/G' ${APPS_DIR}/public/include/cs_mem.h; \
+	fi
+	$(OPMOCK_CMD) -i="${APPS_DIR}/public/include/cs_mem.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+$(GENDIR)/cs_tms_stub.c:
+	$(OPMOCK_CMD) -i="${APPS_DIR}/public/include/cs_tms.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+$(GENDIR)/gpio_mgr_stub.c:
+	$(OPMOCK_CMD) -i="$(TOP_DIR)/sysdrivers/gpio_mgr/gpio_mgr.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89
+
+$(GENDIR)/qmi-device_stub.c:
+	$(OPMOCK_CMD) -i="$(APPS_DIR)/public/include/libqmi-glib/qmi-device.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -s="qmi_device_get_type,qmi_device_get_path,qmi_device_get_path_display" \
+	              -D=__LIBQMI_GLIB_H_INSIDE__ \
+	              -I="${GLIB_DIR}" \
+	              -I="${GLIB_DIR}/glib" \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+#$(GENDIR)/qmi-client_stub.c:
+#	$(OPMOCK_CMD) -i="$(APPS_DIR)/public/include/libqmi-glib/qmi-client.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -D=__LIBQMI_GLIB_H_INSIDE__ \
+	              -I="${GLIB_DIR}" \
+	              -I="${GLIB_DIR}/glib" \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+$(GENDIR)/qmi-ctl.h: $(LIBQMI) 
+	cp $(LIBQMI_DIR)/generated/$(@F) $@
+
+$(GENDIR)/qmi-client.c: $(LIBQMI) $(GENDIR)/qmi-ctl.h
+	cp $(LIBQMI_DIR)/$(@F) $@
+
+$(GENDIR)/qmi-dms_stub.c:
+	$(OPMOCK_CMD) -i="$(APPS_DIR)/public/include/libqmi-glib/qmi-dms.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -s="qmi_client_dms_get_type,qmi_message_dms_get_operating_mode_output_get_result,qmi_message_dms_get_operating_mode_output_get_mode,qmi_message_dms_get_operating_mode_output_get_type,qmi_message_dms_get_operating_mode_output_ref,qmi_message_dms_get_operating_mode_output_unref,qmi_message_dms_set_operating_mode_input_get_mode,qmi_message_dms_set_operating_mode_input_set_mode,qmi_message_dms_set_operating_mode_input_get_type,qmi_message_dms_set_operating_mode_input_ref,qmi_message_dms_set_operating_mode_input_unref,qmi_message_dms_set_operating_mode_input_new,qmi_message_dms_set_operating_mode_output_get_result,qmi_message_dms_set_operating_mode_output_get_type,qmi_message_dms_set_operating_mode_output_ref,qmi_message_dms_set_operating_mode_output_unref" \
+	              -D=__LIBQMI_GLIB_H_INSIDE__ \
+	              -I="${GLIB_DIR}" \
+	              -I="${GLIB_DIR}/glib" \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+$(GENDIR)/qmi-nas_stub.c:
+	$(OPMOCK_CMD) -i="$(APPS_DIR)/public/include/libqmi-glib/qmi-nas.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -s="qmi_client_nas_get_type,qmi_message_nas_get_signal_info_output_get_5g_signal_strength,qmi_message_nas_get_signal_info_output_get_result,qmi_message_nas_get_signal_info_output_get_type,qmi_message_nas_get_signal_info_output_ref,qmi_message_nas_get_signal_info_output_unref" \
+	              -D=__LIBQMI_GLIB_H_INSIDE__ \
+	              -I="${GLIB_DIR}" \
+	              -I="${GLIB_DIR}/glib" \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+$(GENDIR)/qmi-enum-types.c: $(LIBQMI) 
+	cp $(LIBQMI_DIR)/generated/$(@F) $@
+
+$(GENDIR)/qmi-error-types.c: $(LIBQMI) 
+	cp $(LIBQMI_DIR)/generated/$(@F) $@
+
+$(GENDIR)/qmi-error-quarks.c: $(LIBQMI) 
+	cp $(LIBQMI_DIR)/generated/$(@F) $@
+
+$(GENDIR)/cfg_api_stub.c:
+	$(OPMOCK_CMD) -i="${APPS_DIR}/private/appkgs/cfgmgr_ms/inc/cfg_api.h" \
+                  -o="$(GENDIR)" \
+                  -std=gnu89
+
+$(GENDIR)/timer_stub.c:
+	$(OPMOCK_CMD) -i="${APPS_DIR}/private/libs/timer/timer.h" \
+	              -o="$(GENDIR)" \
+	              -std=gnu89 \
+	              -I="$(APPS_DIR)/private/libs/timer" \
+	              -I="$(APPS_DIR)/public/include" \
+	              -I="$(APPS_DIR)/public/include/linux"
+
+##########################################################################

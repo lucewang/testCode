@@ -1,0 +1,145 @@
+
+TOP_DIR = $(shell hg root)
+XSP_OPENSOURCE ?= xs/XS_OPENSOURCE.mk
+XSP_COMMONSERVICE ?=xs/XS_COMMONSERVICE.mk
+SRC_DIR = ../src
+
+GTEST_LIB = /opt/tools/ut_environment/lib
+GTEST_DIR = /opt/tools/ut_environment
+MOCK_DIR = /opt/tools/ut_environment/opmock2
+GCOVR = $(TOP_DIR)/build/ut/scripts/gcovr
+
+include $(TOP_DIR)/$(XSP_OPENSOURCE)
+include $(TOP_DIR)/$(XSP_COMMONSERVICE)
+
+export CC = gcc
+export CXX = g++
+export CFG_HTTP_5G_CPE=y
+
+CFLAGS = -g -DUT -DIMAGE_SIGNATURE
+ifeq ($(CFG_HTTP_5G_CPE), y)
+CFLAGS += -DFIVEG_CPE
+endif
+CFLAGS += -Wall -I$(MOCK_DIR)/support
+
+#for c include
+CFLAGS += \
+   -I. \
+   -I$(SRC_DIR) \
+   -I$(TOP_DIR)/apps/private/libs/upgrade/export \
+   -I$(TOP_DIR)/apps/private/libs/upgrade/include \
+   -I$(TOP_DIR)/include \
+   -I$(TOP_DIR)/apps/private/libs/hal/led \
+   -I$(TOP_DIR)/sysdrivers/RI/include \
+   -I$(TOP_DIR)/sysdrivers/led_driver \
+   -I$(TOP_DIR)/apps/private/libs/hal/led \
+   -I$(TOP_DIR)/apps/private/libs/hal/hcfg \
+   -I$(TOP_DIR)/apps/private/libs/hal/scfg \
+   -I$(COMMONSERVICE_REPODIR)/cs_crypto/export \
+   -I$(COMMONSERVICE_REPODIR)/featuredb/export
+
+#for c++ include
+CPPFLAGS += -DUSE_LIB_TRACE -Wall -fPIC\
+   -I. \
+   -I$(SRC_DIR)
+
+# Flags passed to the preprocessor.
+CPPFLAGS += -isystem $(GTEST_DIR)/include
+
+
+#for dynamic lib
+LDFLAGS += \
+		-L. \
+        -lpthread -lrt
+
+LDFLAGS += -L$(GTEST_LIB) -lgtest_main -lgtest -rdynamic -ldl -lgcov
+
+
+
+# All tests produced by this Makefile.  Remember to add new tests you created to the list.
+TESTS =libupgrade_app_ut
+
+TESTOBJS = ./libupgrade.o \
+	./libupgrade_cb.o
+
+          
+TESTSRCS = ./libupgrade.c \
+         ./libupgrade_cb.c
+
+TESTHEAD = 	$(wildcard ../include/*.h) \
+
+UTSRCS =	$(wildcard ./*.cc) 
+	
+UTOBJS =	$(patsubst %.cc,%.o,$(UTSRCS)) 
+		
+###########################################################################################################
+.NOTPARALLEL :
+
+all : prepare LIBUPGRADE_MAKE UT_MAKE $(TESTS) ggcov 
+
+cpe: clearMock UT_MAKE libupgrade_app_ut
+
+clearMock:
+	rm -f $(TESTS) *.o 
+
+clean : gclean
+	rm -f $(TESTS) *.o 
+	rm -fr mock_stub.c mock_stub.h mock_wrap.c
+
+prepare: 
+	cp ../src/*.c ./
+
+LIBUPGRADE_MAKE : commonservice_check $(TESTSRCS) $(TESTHEAD)
+	./generate.sh
+	$(CC)  $(CFLAGS) -c -g mock_stub.c $(TESTSRCS) -D CMS_LOG0 --coverage
+
+UT_MAKE : $(UTSRCS) 
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CFLAGS) -c $(UTSRCS)
+	
+libupgrade_app_ut : $(TESTOBJS) $(UTOBJS) mock_stub.o  $(MOCK_DIR)/support/opmock.o 
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CFLAGS) -lpthread $^ -o $@ $(LDFLAGS) -lgcov
+	export LD_LIBRARY_PATH=. ; ./libupgrade_app_ut
+
+##########################################################################################################
+ggcov:  $(libupgrade_app_ut)
+	cd $(TOP_DIR) ;  curdir=$$OLDPWD ;  topdir=$$PWD ;  cd $$curdir ; \
+	lcov --capture --directory ./ --rc lcov_branch_coverage=1 --output-file ut_tmp.info  ; \
+	lcov -r ut_tmp.info "mock_stub.c" "usr/include/c++/*" --rc lcov_branch_coverage=1 -o ut.info ; \
+	genhtml ut.info --branch-coverage --output-directory ut_report --title "libupgrade unit test" --show-details --legend -p "$$topdir"
+ 
+gclean: 
+	rm -rf *.info
+	rm -rf ut_report
+	rm -rf ./*.gcno ./*.gcda
+	
+######## COMMONSERVICE CHECK ########################
+COMMONSERVICE_TOKEN:=$(TOP_DIR)/xs/.COMMONSERVICE
+COMMONSERVICE_CHECK:=$(COMMONSERVICE_TOKEN).SST
+
+commonservice_check: $(COMMONSERVICE_CHECK)
+	rm -rf $(APPS_DIR)/private/libs/COMMONSERVICE && ln -sf $(COMMONSERVICE_REPODIR) $(APPS_DIR)/private/libs/COMMONSERVICE
+
+$(COMMONSERVICE_CHECK): $(TOP_DIR)/$(XSP_COMMONSERVICE)
+	@echo "++++++++++++++++ Prepare COMMONSERVICE ++++++++++++++++"
+	@if [ ! -d $(COMMONSERVICE_REPODIR)/.hg ]; then \
+                echo -e "\t >>>>> Clone COMMONSERVICE >>>>>\n\t from $(COMMONSERVICE_REPO) (rev: $(COMMONSERVICE_REVISION))\n\t to $(COMMONSERVICE_REPODIR)" && \
+                if [ -d $(COMMONSERVICE_REPODIR) ]; then $(RM) -r $(COMMONSERVICE_REPODIR); fi && \
+                hg clone  $(COMMONSERVICE_REPO) $(COMMONSERVICE_REPODIR); \
+        fi && \
+        echo "----- REVERT -----"  && \
+        hg -R $(COMMONSERVICE_REPODIR) revert --all && \
+        echo "----- PURGE  -----"  && \
+        hg -R $(COMMONSERVICE_REPODIR) purge --all && \
+        CURRENT_REV=`hg id --debug -i -R $(COMMONSERVICE_REPODIR)` && \
+        EXPECTED_REV=`hg id --debug -i -R $(COMMONSERVICE_REPODIR) -r $(COMMONSERVICE_REVISION) 2>/dev/null || true` && \
+        if [ -z "$$EXPECTED_REV" ]; then \
+                echo "----- PULL   -----"  && \
+                hg -R $(COMMONSERVICE_REPODIR) pull -r $(COMMONSERVICE_REVISION) $(COMMONSERVICE_REPO); \
+        fi && \
+        IS_MATCH=`echo $$CURRENT_REV | grep $(COMMONSERVICE_REVISION) >/dev/null 2>&1; echo $$?`  && \
+        if [ "$$IS_MATCH"x != "0"x ]; then \
+                echo "----- UPDATE -----"  && \
+                hg -R $(COMMONSERVICE_REPODIR) update -r $(COMMONSERVICE_REVISION); \
+	fi
+	@touch $@
+                                

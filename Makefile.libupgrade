@@ -1,0 +1,19 @@
+
+TOP_DIR ?= $(shell hg root)
+include $(TOP_DIR)/makeRule/make.common
+
+SUB_DIRS := src
+
+.PHONY : $(SUB_DIRS)
+
+install: all
+
+all: $(SUB_DIRS)
+
+$(SUB_DIRS):
+	$(MAKE) -C $@
+
+clean:
+	for dir in $(SUB_DIRS); do \
+	$(MAKE) -C $$dir clean; \
+	done

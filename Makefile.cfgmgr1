@@ -1,0 +1,32 @@
+
+SUB_DIRS := src
+.PHONY : $(SUB_DIRS)
+
+ifeq ($(PRODUCT), 5GGW3-OMNI-1)
+STUB_LIB_DIRS := lib
+.PHONY : $(STUB_LIB_DIRS)
+
+all: $(STUB_LIB_DIRS) $(SUB_DIRS)
+
+$(STUB_LIB_DIRS):
+	echo "====start build cfgmgr stub lib"
+	$(MAKE) -C $@
+else
+all: $(SUB_DIRS)
+endif
+
+$(SUB_DIRS):
+	echo "====start build cfgmgr"
+	$(MAKE) -C $@ datamodel
+
+ifneq ($(PRODUCT),5GReceiver-HG-1)
+	$(MAKE) -C $@ ubus_gen
+endif 
+	$(MAKE) -C $@ json_gen
+	$(MAKE) -C $@
+
+clean:
+	@for dir in $(SUB_DIRS); do \
+	$(MAKE) -C $$dir clean; \
+	done
+

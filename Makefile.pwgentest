@@ -1,0 +1,39 @@
+TARGET_LIB = testpwgen
+
+CC = gcc
+SRC_DIR = $(CS_CRYPTO_TOP_DIR)/src
+SRC_FILE = test.c
+
+OBJS := $(patsubst %.c, %.o, $(SRC_FILE))
+
+ifeq ($(IS_DEBUG),y)
+CFLAGS += -g
+else
+CFLAGS += -o2
+endif
+INSTALL_USR_LIB_DIR = /usr/lib
+OPENSSL_LIB_DIR = /usr/local/lib
+OPENSSL_INCLUDE = /usr/local/include/openssl
+
+EXTERNAL_LIB_INCLUDE = -L. -L$(OPENSSL_LIB_DIR) -L$(INSTALL_USR_LIB_DIR) -lcs_pwgen -lcrypto -lpthread
+INTERNAL_INCLUDE = -I $(CS_CRYPTO_TOP_DIR)/include \
+	-I $(CS_CRYPTO_TOP_DIR)/export
+EXTERNAL_INCLUDE = -I$(OPENSSL_INCLUDE)
+
+CFLAGS += -I../include -I../export -o2 -fPIC -Werror 
+
+ifeq ($(ASB_PLATFORM),host)	
+EXTERNAL_LIB_INCLUDE += $(LDFLAGS) 
+endif
+
+.PHONY:all $(TARGET_LIB) clean 
+
+all: $(TARGET_LIB) 
+
+$(TARGET_LIB): $(SRC_FILE)
+	echo "==========start build libcs_pwgen"
+	$(CC) $^ $(CFLAGS) $(EXTERNAL_INCLUDE) $(EXTERNAL_LIB_INCLUDE) -o $@
+
+clean:
+	$(RM) *.o *.d *.d.* core.* *.a $(TARGET_LIB) 
+	$(RM) -f $(INSTALL_USR_LIB_DIR)/$(TARGET_LIB)

@@ -1,0 +1,122 @@
+TOP_DIR ?= $(shell hg root)
+
+include $(TOP_DIR)/makeRule/make.common
+
+#EXE := usbbridge
+EXE = usbbridge
+
+SRCDIR := src
+OBJDIR := obj
+
+CC_SRCS := \
+        $(SRCDIR)/usbbridge_main.cc \
+        $(SRCDIR)/usbbridge_bcmrouter.cc \
+        $(SRCDIR)/usbbridge_usbrouter.cc \
+        $(SRCDIR)/usbbridge_csmsgservice.cc \
+        $(SRCDIR)/usbbridge_serialservice.cc \
+        $(SRCDIR)/usbbridge_init.cc \
+        $(SRCDIR)/usbbridge_servicefactory.cc \
+        $(SRCDIR)/usbbridge_serialmsghandle.cc \
+        $(SRCDIR)/usbbridge_csmsghandle.cc \
+        $(SRCDIR)/usbbridge_logs.cc \
+
+C_SRCS := $(wildcard $(SRCDIR)/*.c)
+        
+CC_OBJS := $(addprefix $(OBJDIR)/,$(notdir $(CC_SRCS:.cc=.o)))
+C_OBJS  := $(addprefix $(OBJDIR)/,$(notdir $(C_SRCS:.c=.o)))
+OBJS = $(CC_OBJS) $(C_OBJS)
+
+
+CFLAGS += \
+        -g -O2 -std=gnu89 -Wall -Wextra \
+        -Wwrite-strings -Wmissing-declarations -Wmissing-prototypes \
+        -Wdeclaration-after-statement -Wstrict-prototypes \
+        -fno-strict-aliasing -Wno-deprecated-declarations \
+        -Wint-to-pointer-cast -Wfloat-equal -Wno-unused-parameter \
+        -Wno-sign-compare -Wunused-but-set-variable -Wundef \
+        -Wimplicit-function-declaration -Wpointer-arith -Winit-self \
+        -Wshadow -Wmissing-include-dirs -Waggregate-return -Wformat-security \
+        -Wtype-limits \
+        -Werror
+
+CXXFLAGS += -g -O2 -std=c++11 -pedantic -Wall -Wextra -Werror 
+#CXXFLAGS += -DUSE_LIB_TRACE -Wall -fPIC
+
+# FIXME: Temporary suppress warnings
+#CFLAGS += -Wno-discarded-qualifiers
+CXXFLAGS += -Wno-variadic-macros
+		 
+
+INCLUDES += -I. \
+           -I$(TOP_DIR)/apps/private/appkgs/usbbridge/include 
+
+
+#for c++ include
+CPPFLAGS += \
+            -I. \
+            -I./export \
+            -I./include \
+            -I$(TOP_DIR)/apps/public/include \
+            -I$(TOP_DIR)/apps/public/include/linux \
+            -I$(TOP_DIR)/include
+            #-I$(TOP_DIR)/apps/private/appkgs/cfgmgr/inc \
+            #-I$(TOP_DIR)/apps/private/appkgs/diagnosis/inc \
+            #-I$(TOP_DIR)/apps/private/appkgs/evtmgr/inc \
+            #-I$(TOP_DIR)/apps/private/libs/hal/scfg \
+            #-I$(TOP_DIR)/apps/private/libs/hal/hcfg \
+            #-I$(TOP_DIR)/apps/private/appkgs/lanhosts/export \
+            #-I$(TOP_DIR)/apps/private/libs/dbus_signal \
+            #-I$(TOP_DIR)/apps/private/appkgs/rgwstack/export/rgw \
+	          #-I$(TOP_DIR)/apps/private/libs/COMMONSERVICE/ndbus/export \
+            #-I$(TOP_DIR)/apps/private/libs/COMMONSERVICE/ndbus/signal_observer/export \
+            
+
+   
+#for dynamic lib
+LDFLAGS += -L. \
+           -L INSTALL_LIB_DIR\
+           -lstdc++ \
+           -L$(INSTALL_DIR)/lib -lscfg -lpthread -lrt -ldl\
+           -L$(TOP_DIR)/apps/public/libs/cs_msg -lcs_msg \
+           -L$(TOP_DIR)/apps/public/libs/cslib -lcs_util \
+           #-L$(TOP_DIR)/apps/private/libs/cmac/src -lcmac \
+           #-L$(TOP_DIR)/apps/private/libs/dnsext -ldnsext \
+           #-L$(TOP_DIR)/apps/private/appkgs/cfgmgr/src -lcfg \
+           #-L$(TOP_DIR)/apps/private/libs/hal/hcfg -lhcfg \
+           #-L$(TOP_DIR)/apps/private/libs/COMMONSERVICE/ndbus/src -lndbus -Wl,-rpath=$(INSTALL_LIB_DIR) \
+           #-L$(TOP_DIR)/apps/private/libs/COMMONSERVICE/ndbus/signal_observer/client -ldbus_signal_msg_map -Wl,-rpath=$(INSTALL_LIB_DIR) \
+		
+
+
+CPPFLAGS += -MMD
+
+all:install
+
+.PHONY: install
+install: $(EXE)
+	install -c -m 755 $(EXE) $(INSTALL_DIR)/sbin
+	$(STRIP) $(INSTALL_DIR)/sbin/$(EXE)
+
+.PHONY: clean
+clean:
+	rm -f $(INSTALL_SBIN_DIR)/$(EXE)
+	rm -f $(EXE) $(OBJDIR)/*.o $(OBJDIR)/*.d
+
+
+$(EXE): $(OBJS) 
+	$(CC) $^ $(LDFLAGS) -o $@
+
+$(OBJS): | $(OBJDIR)
+
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+
+sinclude $(OBJS:%.o=%.d)
+

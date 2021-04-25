@@ -1,0 +1,204 @@
+TOP_DIR ?= $(shell hg root)
+ASB_PLATFORM ?= brcm
+ONT_TYPE ?= 5g24wa
+include $(TOP_DIR)/makeRule/make.common
+
+
+PROG := antennamgr
+
+SRCDIR := src
+OBJDIR := obj
+EXEDIR := bin
+
+EXE := $(EXEDIR)/$(PROG)
+
+CC_SRCS := $(wildcard $(SRCDIR)/*.cc)
+C_SRCS  := $(wildcard $(SRCDIR)/*.c)
+
+CC_OBJS := $(addprefix $(OBJDIR)/,$(notdir $(CC_SRCS:.cc=.o)))
+C_OBJS  := $(addprefix $(OBJDIR)/,$(notdir $(C_SRCS:.c=.o)))
+OBJS    := $(CC_OBJS) $(C_OBJS)
+
+CFLAGS += \
+        -g -O2 -std=gnu89 -Wall -Wextra \
+        -Wwrite-strings -Wmissing-declarations -Wmissing-prototypes \
+        -Wdeclaration-after-statement -Wstrict-prototypes \
+        -fno-strict-aliasing -Wno-deprecated-declarations \
+        -Wint-to-pointer-cast -Wfloat-equal -Wno-unused-parameter \
+        -Wno-sign-compare -Wunused-but-set-variable -Wundef \
+        -Wimplicit-function-declaration -Wpointer-arith -Winit-self \
+        -Wshadow -Wmissing-include-dirs -Waggregate-return -Wformat-security \
+        -Wtype-limits \
+        -Werror
+
+CXXFLAGS += -g -O2 -std=c++11 -pedantic -Wall -Wextra -Werror
+
+# FIXME: Temporary suppress warnings
+#CFLAGS += -Wno-discarded-qualifiers
+CXXFLAGS += -Wno-variadic-macros
+
+GLIB_DIR := $(APPS_DIR)/public/libs/glib-2.41.1
+
+CPPFLAGS += \
+        -I. \
+        -I./include \
+        -I$(APPS_DIR)/public/include \
+        -I$(APPS_DIR)/public/include/linux \
+        -I$(TOP_DIR)/include \
+        -I$(TOP_DIR)/sysdrivers/gpio_mgr \
+        -I$(GLIB_DIR) \
+        -I$(GLIB_DIR)/gmodule \
+        -I$(GLIB_DIR)/glib \
+        -I$(APPS_DIR)/public/include/libqmi-glib \
+        -I$(APPS_DIR)/private/appkgs/usbbridge/include \
+        -I$(APPS_DIR)/private/appkgs/cfgmgr_ms/inc \
+        -I$(APPS_DIR)/private/appkgs/modmgr/inc \
+        -I$(APPS_DIR)/private/libs/hal/led/
+
+LDFLAGS += -L$(INSTALL_LIB_DIR)
+
+LDFLAGS += -lstdc++ \
+           -lpthread \
+           -lcs_util \
+           -lcs_msg \
+           -lgpio_mgr \
+           -lgio-2.0 \
+           -lgobject-2.0 \
+           -lglib-2.0 \
+           -lqmi-glib \
+           -lcfg \
+           -lrt
+
+# Host-environment
+ifeq ($(ASB_PLATFORM),host)
+CPPFLAGS += -DHOST
+endif
+
+# Special debugging of initial sequence
+ifneq ($(ANTMGR_SLOW_SWEEPING),)
+CPPFLAGS += -DANTMGR_SLOW_SWEEPING
+endif
+
+ifneq ($(ANTMGR_START_DELAY),)
+CPPFLAGS += -DSTART_DELAY=$(ANTMGR_START_DELAY)
+endif
+
+# for two antenna leds case
+ifneq ($(ANTMGR_TWO_ANTENNA_LEDS),)
+CPPFLAGS += -DANTMGR_TWO_ANTENNA_LEDS
+endif
+
+LDFLAGS += -Wl,-rpath,$(realpath $(INSTALL_LIB_DIR))
+
+COV_INTERMED_DIR ?= coverity-info
+COV_FILE_REGEX := '$(notdir $(realpath .))\/(src|include)\/'
+
+CPPFLAGS += -MMD
+
+##########################################################################
+# TODO: The target 'check' might be added as dependency of target 'all',
+#       so the UT will be always run whenever build is triggered
+#       Pros: More safety during build of RGW image.
+#       Cons: The whole image build would take longer
+.PHONY: all
+all: install
+
+.PHONY: check
+check: ut coverity
+
+.PHONY: ut
+ut: clean-ut
+	$(MAKE) -C ut
+
+.PHONY: clean-ut
+clean-ut:
+	$(MAKE) -C ut clean
+
+.PHONY: coverity
+coverity: clean-coverity
+	mkdir $(COV_INTERMED_DIR)
+	cov-build --dir $(COV_INTERMED_DIR) --no-caa-info --chase-symlinks --desktop make $(EXE)
+	cov-run-desktop --disconnected --dir $(COV_INTERMED_DIR) --exit1-if-defects true \
+	                --aggressiveness-level medium --concurrency \
+	                --checker-regex '^([^R]|.[^W])' \
+	                --file-regex $(COV_FILE_REGEX) \
+	                --analyze-captured-source
+# NOTE: If previous command reports too many false positives,
+#       it might help to add following parameters:
+#       --disable PARSE_ERROR --disable-parse-warnings \
+#       --disable STACK_USE --disable PASS_BY_VALUE
+
+.PHONY: clean-coverity
+clean-coverity:
+	$(RM) -r $(COV_INTERMED_DIR) data-coverity
+	$(RM) $(EXE) $(OBJDIR)/*.o $(OBJDIR)/*.d
+
+###############################################
+.PHONY: info
+info:
+	@echo "ASB_PLATFORM = $(ASB_PLATFORM)"
+	@echo "ONT_TYPE     = $(ONT_TYPE)"
+	@echo "MAKE = $(MAKE)"
+	@echo "CC   = $(CC)"
+	@echo "CXX  = $(CXX)"
+	@echo "CPP  = $(CPP)"
+	@echo "AR   = $(AR)"
+	@echo "AS   = $(AS)"
+	@echo "LD   = $(LD)"
+	@echo "CFLAGS  = $(CFLAGS)"
+	@echo "CXXFLAGS= $(CXXFLAGS)"
+	@echo "CPPFLAGS= $(CPPFLAGS)"
+	@echo "CC_SRCS = $(CC_SRCS)"
+	@echo "CC_OBJS = $(CC_OBJS)"
+	@echo "C_SRCS  = $(C_SRCS)"
+	@echo "C_OBJS  = $(C_OBJS)"
+	@echo "OBJS    = $(OBJS)"
+	@echo "PROG    = $(PROG)"
+	@echo "EXE     = $(EXE)"
+###############################################
+
+$(EXE): $(OBJS) | $(EXEDIR)
+	$(CC) $^ $(LDFLAGS) -o $@
+
+.PHONY: clean-exe
+clean-exe: uninstall
+	$(RM) $(EXE) $(OBJDIR)/*.o $(OBJDIR)/*.d
+
+$(EXEDIR):
+	mkdir $(EXEDIR)
+
+$(OBJS): | $(OBJDIR)
+
+$(OBJDIR):
+	mkdir $(OBJDIR)
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.cc
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
+
+.PHONY: install
+install: $(INSTALL_SBIN_DIR)/$(PROG) install-scripts
+
+$(INSTALL_SBIN_DIR)/$(PROG): $(EXE)
+	install -m 755 -t $(INSTALL_SBIN_DIR) $^
+
+.PHONY: uninstall
+uninstall: uninstall-scripts
+	$(RM) $(INSTALL_SBIN_DIR)/$(PROG)
+
+.PHONY: install-scripts
+install-scripts:
+	$(MAKE) -C scripts install
+
+.PHONY: uninstall-scripts
+uninstall-scripts:
+	$(MAKE) -C scripts uninstall
+
+##########################################################################
+.PHONY: clean
+clean: clean-ut clean-coverity clean-exe
+	$(RM) -r $(EXEDIR) $(OBJDIR)
+
+sinclude $(OBJS:%.o=%.d)
