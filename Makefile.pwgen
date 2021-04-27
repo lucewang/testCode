@@ -1,0 +1,44 @@
+TARGET_LIB = libcs_pwgen.so
+
+CC = gcc
+SRC_DIR = $(CS_CRYPTO_TOP_DIR)/src
+SRC_FILE = cs_pwgen.c ../src/cs_crypto.c ../src/cs_crypto_util.c ../src/cs_sha.c ../src/cs_signverify.c ../src/cs_staticversion.c ../src/cs_pkcs7pad.c ../src/cs_aes.c ../src/cs_base64.c
+SRC_TEST = test.c
+
+OBJS := $(patsubst %.c, %.o, $(SRC_FILE))
+
+ifeq ($(IS_DEBUG),y)
+CFLAGS += -g
+else
+CFLAGS += -o2
+endif
+INSTALL_USR_LIB_DIR = /usr/lib
+OPENSSL_LIB_DIR = /usr/local/lib
+OPENSSL_INCLUDE = /usr/local/include/openssl
+
+EXTERNAL_LIB_INCLUDE = -L$(OPENSSL_LIB_DIR) -L$(INSTALL_USR_LIB_DIR) -lcrypto -lpthread
+EXTERNAL_CTEST_LIB_INCLUDE = -L. -L$(OPENSSL_LIB_DIR) -L$(INSTALL_USR_LIB_DIR) -lcs_pwgen -lcrypto -lpthread
+INTERNAL_INCLUDE = -I $(CS_CRYPTO_TOP_DIR)/include \
+	-I $(CS_CRYPTO_TOP_DIR)/export
+EXTERNAL_INCLUDE = -I$(OPENSSL_INCLUDE)
+
+CFLAGS += -I../include -I../export -fPIC -Werror -shared -Wl,-soname,$(TARGET_LIB)
+CTESTFLAGS += -I../include -I../export -o2 -fPIC -Werror
+
+ifeq ($(ASB_PLATFORM),host)	
+EXTERNAL_LIB_INCLUDE += $(LDFLAGS) 
+endif
+
+.PHONY:all $(TARGET_LIB) clean 
+
+all: $(TARGET_LIB)
+	echo "==========start build testpwgen"
+	$(CC) $(CTESTFLAGS) $(EXTERNAL_INCLUDE) $(SRC_TEST) $(EXTERNAL_CTEST_LIB_INCLUDE) -o testpwgen
+
+$(TARGET_LIB): $(SRC_FILE)
+	echo "==========start build libcs_pwgen"
+	$(CC) $(EXTERNAL_LIB_INCLUDE) $(EXTERNAL_INCLUDE) $(CFLAGS) -o $@ $^
+
+clean:
+	$(RM) *.o *.d *.d.* core.* *.a $(TARGET_LIB) 
+	$(RM) -f $(INSTALL_USR_LIB_DIR)/$(TARGET_LIB)
